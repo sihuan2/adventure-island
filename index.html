@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>勇闖冒險島：組合鍵的試煉</title>
+  <style>
+    :root {
+      --bg-color: #050a0f;
+      --primary-color: #00f2ff;
+      --secondary-color: #ff00ea;
+      --highlight-color: #ffff00;
+      --text-color: #e0e0e0;
+      --warning-color: #ff3e3e;
+    }
+
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-color);
+      font-family: 'Segoe UI', 'Microsoft JhengHei', sans-serif;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    #game-container {
+      position: relative;
+      box-shadow: 0 0 50px rgba(0, 242, 255, 0.2);
+      border: 2px solid #333;
+      border-radius: 8px;
+      overflow: hidden;
+      background: black;
+    }
+
+    canvas { display: block; }
+
+    .overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 800px;
+      height: 600px;
+      background: rgba(10, 14, 20, 0.95);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 10;
+    }
+
+    .hidden { display: none !important; }
+
+    h1 { color: var(--primary-color); text-shadow: 0 0 10px var(--primary-color); margin-bottom: 5px; }
+
+    input {
+      padding: 12px;
+      font-size: 18px;
+      border-radius: 4px;
+      border: 1px solid var(--primary-color);
+      background: #222;
+      color: white;
+      margin-bottom: 10px;
+      width: 250px;
+      text-align: center;
+    }
+
+    .start-hint { font-size: 14px; color: #888; margin-bottom: 20px; }
+
+    button {
+      padding: 12px 30px;
+      font-size: 20px;
+      background: var(--primary-color);
+      color: #000;
+      border: none;
+      border-radius: 4px;
+      cursor: pointer;
+      font-weight: bold;
+    }
+
+    .leaderboard-container {
+      margin-top: 15px;
+      width: 450px;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 8px;
+      padding: 15px;
+      border: 1px solid #444;
+    }
+
+    .leaderboard-list {
+      max-height: 200px;
+      overflow-y: auto;
+      padding-right: 5px;
+      min-height: 50px;
+    }
+    .leaderboard-list::-webkit-scrollbar { width: 6px; }
+    .leaderboard-list::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.05); border-radius: 4px; }
+    .leaderboard-list::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+    .leaderboard-list::-webkit-scrollbar-thumb:hover { background: var(--primary-color); }
+
+    .leaderboard-item {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 12px;
+      font-size: 16px;
+      border-bottom: 1px solid #222;
+    }
+
+    .is-me {
+      background: rgba(255, 255, 0, 0.15) !important;
+      border: 1px solid var(--highlight-color);
+      color: var(--highlight-color);
+      font-weight: bold;
+    }
+
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 0;
+      width: 100%;
+      padding: 0 20px;
+      display: flex;
+      justify-content: space-between;
+      pointer-events: none;
+      z-index: 5;
+    }
+
+    .hud-item { font-size: 18px; color: var(--primary-color); }
+    #hud-timer { font-size: 24px; font-weight: bold; color: var(--secondary-color); }
+    #connection-status { position: absolute; bottom: 5px; right: 10px; font-size: 10px; color: #444; }
+  </style>
+</head>
+
+<body>
+<div id="game-container">
+  <div id="hud" class="hidden">
+    <div>
+      <div class="hud-item" id="hud-score">分數: 0</div>
+      <div class="hud-item" id="hud-level">階段: 基礎練習</div>
+    </div>
+    <div style="text-align:center">
+      <div class="hud-item" style="font-size:12px">剩餘秒數</div>
+      <div id="hud-timer">60</div>
+    </div>
+    <div style="text-align:right">
+      <div class="hud-item" id="hud-name">玩家: -</div>
+    </div>
+  </div>
+
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+
+  <div id="start-screen" class="overlay">
+    <h1>勇闖冒險島：組合鍵的試煉</h1>
+    <p>請輸入座號或姓名開始 (60秒挑戰)</p>
+    <input type="text" id="player-name" placeholder="輸入座號或姓名" maxlength="10">
+    <div class="start-hint">按 Enter 或 空白鍵 (Space) 全螢幕開始</div>
+    <button id="btn-start">進入冒險</button>
+
+    <div class="leaderboard-container">
+      <p id="leaderboard-title"
+         style="text-align:center; color:var(--primary-color); margin: 0 0 10px 0; font-weight: bold;">
+        全班即時排行 (前 15 名)
+      </p>
+      <div id="start-leaderboard" class="leaderboard-list">正在載入排行榜資料...</div>
+    </div>
+  </div>
+
+  <div id="end-screen" class="overlay hidden">
+    <h1 id="end-title">試煉結束</h1>
+    <div id="my-rank-display" style="font-size:24px; color:var(--highlight-color); margin:10px 0;">
+      排名計算中...
+    </div>
+    <p id="final-score" style="font-size: 20px;">您的得分: 0</p>
+    <div class="leaderboard-container">
+      <p style="text-align:center; color:var(--primary-color); margin: 0 0 10px 0; font-weight: bold;">
+        全班成績榜 (前 15 名，可捲動)
+      </p>
+      <div id="end-leaderboard" class="leaderboard-list">正在更新全班成績...</div>
+    </div>
+    <button id="btn-restart" style="margin-top:15px;">再試一次</button>
+  </div>
+
+  <div id="connection-status">模式: Google 試算表雲端排行</div>
+</div>
+
+<script>
+  // ========= 你已設定好的 GAS Web App =========
+  const GAS_URL = "https://script.google.com/macros/s/AKfycbyxn8ZXBYkaPFm-HqWI2rZiLUYtXMQK0ygAsLZEjEohOah0G_-enKLrF98SNWr-pQFGmQ/exec";
+  const LEADERBOARD_LIMIT = 15;
+
+  // 固定每台裝置 uid（避免重整就變新玩家）
+  let userUid = localStorage.getItem('kb_game_uid');
+  if (!userUid) {
+    userUid = (crypto.randomUUID ? crypto.randomUUID() : ("uid-" + Math.random().toString(36).slice(2)));
+    localStorage.setItem('kb_game_uid', userUid);
+  }
+
+  // ========= UI 元件 =========
+  const connectionDisplay = document.getElementById('connection-status');
+  const startLbTitle = document.getElementById('leaderboard-title');
+
+  // ========= 遊戲邏輯變數 =========
+  const canvas = document.getElementById('gameCanvas');
+  const ctx = canvas.getContext('2d');
+  let playerName = "";
+  let score = 0;
+  let gameState = 'start';
+  let level = 1;
+  let targets = [];
+  let lastSpawnTime = 0;
+
+  const gameDuration = 60;
+  let timeLeft = gameDuration;
+  let startTime = 0;
+
+  // 快取最新排行榜資料（前15名）
+  let currentRankings = [];
+
+  const level1Data = ['!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '{', '}', '|', ':', '"', '<', '>', '?'];
+  const level2Data = [
+    {text: '複製 (Ctrl+C)', key: 'c'},
+    {text: '貼上 (Ctrl+V)', key: 'v'},
+    {text: '全選 (Ctrl+A)', key: 'a'},
+    {text: '存檔 (Ctrl+S)', key: 's'},
+    {text: '復原 (Ctrl+Z)', key: 'z'}
+  ];
+
+  // ========= GAS：送分數 / 拉排行榜 =========
+  async function saveScoreToGAS() {
+    const payload = {
+      uid: userUid,
+      name: playerName,
+      score: score,
+      timestamp: Date.now()
+    };
+
+    const res = await fetch(GAS_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify(payload),
+      cache: "no-store",
+    });
+
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "save failed");
+  }
+
+  async function fetchLeaderboardFromGAS() {
+    const url = `${GAS_URL}?limit=${LEADERBOARD_LIMIT}&uid=${encodeURIComponent(userUid)}&_=${Date.now()}`;
+    const res = await fetch(url, { cache: "no-store" });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || "fetch failed");
+
+    const list = (data.top || []).map(x => ({
+      id: x.uid,
+      name: x.name,
+      score: Number(x.score || 0),
+    }));
+
+    currentRankings = list;
+    updateRankingsUI(list);
+
+    if (data.myRank) {
+      document.getElementById('my-rank-display').innerText = `您的全班排名：第 ${data.myRank} 名`;
+    } else {
+      document.getElementById('my-rank-display').innerText = `尚未進榜（前 ${LEADERBOARD_LIMIT} 名）`;
+    }
+  }
+
+  // ========= 排行榜渲染 =========
+  function updateRankingsUI(list) {
+    // 不要原地 sort，避免資料被洗掉
+    const sorted = [...list].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+    renderLeaderboard('start-leaderboard', sorted);
+    renderLeaderboard('end-leaderboard', sorted);
+  }
+
+  function renderLeaderboard(elId, sorted) {
+    const el = document.getElementById(elId);
+    if (!el) return;
+
+    if (sorted.length === 0) {
+      el.innerHTML = `<div style="text-align:center; padding: 20px; color:#666;">還沒有勇者留下紀錄，<br>快來成為第一位！</div>`;
+      return;
+    }
+
+    el.innerHTML = sorted.map((item, idx) => `
+      <div class="leaderboard-item ${item.id === userUid ? 'is-me' : ''}">
+        <span><span style="color:#00f2ff;width:25px;display:inline-block">${idx+1}</span> ${escapeHtml(item.name)}</span>
+        <span>${item.score}</span>
+      </div>
+    `).join('');
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({
+      '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+    }[c]));
+  }
+
+  // ========= 全螢幕 =========
+  function requestFullscreen() {
+    const el = document.documentElement;
+    if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+    else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+    else if (el.msRequestFullscreen) el.msRequestFullscreen();
+  }
+
+  function startGame() {
+    const input = document.getElementById('player-name');
+    if (!input.value.trim()) { alert("請先輸入您的座號或姓名唷！"); input.focus(); return; }
+
+    requestFullscreen();
+    playerName = input.value.trim();
+
+    score = 0; level = 1; timeLeft = gameDuration; targets = []; startTime = Date.now();
+    gameState = 'playing';
+
+    document.getElementById('start-screen').classList.add('hidden');
+    document.getElementById('end-screen').classList.add('hidden');
+    document.getElementById('hud').classList.remove('hidden');
+    document.getElementById('hud-name').innerText = `玩家: ${playerName}`;
+  }
+
+  async function endGame() {
+    gameState = 'end';
+    document.getElementById('hud').classList.add('hidden');
+    document.getElementById('end-screen').classList.remove('hidden');
+    document.getElementById('final-score').innerText = `本次得分: ${score}`;
+
+    // 先送分數，再拉一次排行榜（確保自己名次準）
+    try {
+      await saveScoreToGAS();
+      await fetchLeaderboardFromGAS();
+    } catch (e) {
+      console.error(e);
+      document.getElementById('end-leaderboard').innerHTML =
+        `<div style="text-align:center; padding: 20px; color:#ff8080;">雲端寫入/讀取失敗，請檢查網路或稍後重試。</div>`;
+    }
+  }
+
+  class Target {
+    constructor() {
+      this.x = Math.random() * (canvas.width - 200) + 100;
+      this.y = -50;
+      this.speed = 0.35 + (score / 1500);
+      this.radius = 40;
+      this.isShortcut = level >= 2 && Math.random() > 0.4;
+      this.data = this.isShortcut ? level2Data[Math.floor(Math.random() * level2Data.length)] : level1Data[Math.floor(Math.random() * level1Data.length)];
+      this.color = this.isShortcut ? '#ff4500' : '#00f2ff';
+    }
+    update() { this.y += this.speed; }
+    draw() {
+      ctx.save();
+      ctx.shadowBlur = 10; ctx.shadowColor = this.color;
+      ctx.beginPath(); ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = this.color; ctx.lineWidth = 3; ctx.stroke();
+      ctx.fillStyle = 'white'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.font = this.isShortcut ? 'bold 12px Arial' : 'bold 24px Arial';
+      ctx.fillText(this.isShortcut ? this.data.text : this.data, this.x, this.y);
+      ctx.restore();
+    }
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (gameState === 'playing') {
+      if (e.ctrlKey && ['s', 'a', 'c', 'v', 'z', 'x'].includes(e.key.toLowerCase())) e.preventDefault();
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        const isMatch = t.isShortcut
+          ? (e.ctrlKey && e.key.toLowerCase() === t.data.key)
+          : (e.key === t.data);
+        if (isMatch) { targets.splice(i, 1); score += 10; break; }
+      }
+      if (score > 50) level = 2;
+    } else if (gameState === 'start') {
+      // Enter 用 e.key 更穩
+      const isEnter = (e.key === 'Enter');
+      const isSpace = (e.code === 'Space' && document.activeElement !== document.getElementById('player-name'));
+      if (isEnter || isSpace) {
+        e.preventDefault();
+        startGame();
+      }
+    } else if (gameState === 'end' && (e.key === 'Enter' || e.code === 'Space')) {
+      location.reload();
+    }
+  });
+
+  function loop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (gameState === 'playing') {
+      const now = Date.now();
+      timeLeft = Math.max(0, gameDuration - Math.floor((now - startTime) / 1000));
+      document.getElementById('hud-timer').innerText = timeLeft;
+
+      if (timeLeft <= 0) {
+        endGame();
+        return;
+      }
+
+      const rate = Math.max(2500, 4500 - (score * 5));
+      if (now - lastSpawnTime > rate) { targets.push(new Target()); lastSpawnTime = now; }
+      for (let i = targets.length - 1; i >= 0; i--) {
+        targets[i].update(); targets[i].draw();
+        if (targets[i].y > canvas.height + 50) { targets.splice(i, 1); score = Math.max(0, score - 2); }
+      }
+      document.getElementById('hud-score').innerText = `分數: ${score}`;
+      document.getElementById('hud-level').innerText = (level >= 2) ? '階段: 快捷鍵挑戰' : '階段: 基礎練習';
+    }
+    requestAnimationFrame(loop);
+  }
+
+  document.getElementById('btn-start').onclick = startGame;
+  document.getElementById('btn-restart').onclick = () => location.reload();
+
+  // ========= 啟動：先拉排行榜，開始/結束畫面每 3 秒更新 =========
+  connectionDisplay.innerText = "模式: Google 試算表雲端排行 (全班競技中)";
+  startLbTitle.innerText = `全班即時排行 (前 ${LEADERBOARD_LIMIT} 名)`;
+
+  fetchLeaderboardFromGAS().catch(err => console.error(err));
+  setInterval(() => {
+    if (gameState !== 'playing') {
+      fetchLeaderboardFromGAS().catch(err => console.error(err));
+    }
+  }, 3000);
+
+  requestAnimationFrame(loop);
+</script>
+</body>
+</html>
