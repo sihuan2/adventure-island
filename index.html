@@ -126,11 +126,36 @@
       justify-content: space-between;
       pointer-events: none;
       z-index: 5;
+      box-sizing: border-box;
     }
 
     .hud-item { font-size: 18px; color: var(--primary-color); }
-    #hud-timer { font-size: 24px; font-weight: bold; color: var(--secondary-color); }
+
+    /* 倒數計時：放大 */
+    #hud-timer {
+      font-size: 40px;
+      font-weight: bold;
+      color: var(--secondary-color);
+      line-height: 1;
+    }
+
     #connection-status { position: absolute; bottom: 5px; right: 10px; font-size: 10px; color: #444; }
+
+    /* HUD 三欄固定寬度，避免擠壓造成文字被裁切 */
+    #hud > div:nth-child(1) { width: 260px; }
+    #hud > div:nth-child(2) { width: 120px; }
+    #hud > div:nth-child(3) { width: 260px; }
+
+    /* 右上角玩家名稱允許換行、不中斷顯示 */
+    #hud-name {
+      display: inline-block;
+      max-width: 260px;
+      white-space: normal;     /* 允許換行 */
+      overflow: visible;       /* 不裁切 */
+      word-break: break-word;  /* 中文/長字可折行 */
+      text-align: right;
+      line-height: 1.2;
+    }
   </style>
 </head>
 
@@ -155,7 +180,7 @@
   <div id="start-screen" class="overlay">
     <h1>勇闖冒險島：組合鍵的試煉</h1>
     <p>請輸入座號或姓名開始 (60秒挑戰)</p>
-    <input type="text" id="player-name" placeholder="輸入座號或姓名" maxlength="10">
+    <input type="text" id="player-name" placeholder="輸入座號或姓名" maxlength="15">
     <div class="start-hint">按 Enter 或 空白鍵 (Space) 全螢幕開始</div>
     <button id="btn-start">進入冒險</button>
 
@@ -184,6 +209,11 @@
   </div>
 
   <div id="connection-status">模式: Google 試算表雲端排行</div>
+
+  <!-- 背景音樂 -->
+  <audio id="bgm" preload="auto" loop>
+    <source src="assets/bgm.mp3" type="audio/mpeg">
+  </audio>
 </div>
 
 <script>
@@ -227,6 +257,112 @@
     {text: '存檔 (Ctrl+S)', key: 's'},
     {text: '復原 (Ctrl+Z)', key: 'z'}
   ];
+
+  // ========= 音效：背景音樂 + 倒數提示（含最後10秒降音量） =========
+  const bgmEl = document.getElementById('bgm');
+  let audioCtx = null;
+  let lastBeepSecond = null;
+
+  const BGM_VOL_NORMAL = 0.25;   // 平時音量
+  const BGM_VOL_DUCK = 0.08;     // 最後10秒降到的音量
+  let bgmTargetVol = BGM_VOL_NORMAL;
+  let bgmDuckApplied = false;
+
+  function setBgmTargetVolume(v) {
+    bgmTargetVol = Math.max(0, Math.min(1, v));
+  }
+
+  function tickBgmVolume() {
+    if (!bgmEl) return;
+    const cur = bgmEl.volume ?? 0;
+    const step = 0.01; // 越小越平滑
+    if (Math.abs(cur - bgmTargetVol) < 0.005) {
+      bgmEl.volume = bgmTargetVol;
+    } else {
+      bgmEl.volume = cur + Math.sign(bgmTargetVol - cur) * step;
+    }
+  }
+
+  async function startBGM() {
+    if (!bgmEl) return;
+    try {
+      bgmDuckApplied = false;
+      setBgmTargetVolume(BGM_VOL_NORMAL);
+      bgmEl.volume = BGM_VOL_NORMAL;
+      bgmEl.currentTime = 0;
+      await bgmEl.play();
+    } catch (e) {
+      console.warn("BGM play blocked:", e);
+    }
+  }
+
+  function stopBGM() {
+    if (!bgmEl) return;
+    try {
+      bgmEl.pause();
+      bgmEl.currentTime = 0;
+    } catch {}
+    bgmDuckApplied = false;
+    setBgmTargetVolume(BGM_VOL_NORMAL);
+  }
+
+  function getAudioCtx() {
+    if (!audioCtx) {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume().catch(() => {});
+    return audioCtx;
+  }
+
+  function beep(freq = 880, durationMs = 120, volume = 0.12) {
+    try {
+      const ctx = getAudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+
+      const now = ctx.currentTime;
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.linearRampToValueAtTime(volume, now + 0.01);
+      gain.gain.linearRampToValueAtTime(0.0001, now + durationMs / 1000);
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + durationMs / 1000 + 0.02);
+    } catch (e) {
+      console.warn("beep failed:", e);
+    }
+  }
+
+  // 最後倒數提示音邏輯：最後10秒每秒嗶一次；最後3秒更急促；同時 BGM 自動降音量
+  function handleCountdownBeep(tLeft) {
+    if (tLeft <= 10 && tLeft > 0) {
+      if (!bgmDuckApplied) {
+        bgmDuckApplied = true;
+        setBgmTargetVolume(BGM_VOL_DUCK);
+      }
+    } else {
+      if (bgmDuckApplied) {
+        bgmDuckApplied = false;
+        setBgmTargetVolume(BGM_VOL_NORMAL);
+      }
+      lastBeepSecond = null;
+      return;
+    }
+
+    if (lastBeepSecond === tLeft) return;
+    lastBeepSecond = tLeft;
+
+    if (tLeft <= 3) {
+      beep(1200, 90, 0.14);
+    } else {
+      beep(880, 120, 0.12);
+    }
+  }
 
   // ========= GAS：送分數 / 拉排行榜 =========
   async function saveScoreToGAS() {
@@ -272,7 +408,6 @@
 
   // ========= 排行榜渲染 =========
   function updateRankingsUI(list) {
-    // 不要原地 sort，避免資料被洗掉
     const sorted = [...list].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     renderLeaderboard('start-leaderboard', sorted);
     renderLeaderboard('end-leaderboard', sorted);
@@ -314,7 +449,14 @@
     if (!input.value.trim()) { alert("請先輸入您的座號或姓名唷！"); input.focus(); return; }
 
     requestFullscreen();
-    playerName = input.value.trim();
+
+    // 名稱最多 15 字元（雙重保險：maxlength + slice）
+    playerName = input.value.trim().slice(0, 15);
+    input.value = playerName;
+
+    // 使用者手勢觸發音訊（避免自動播放被擋）
+    startBGM();
+    getAudioCtx();
 
     score = 0; level = 1; timeLeft = gameDuration; targets = []; startTime = Date.now();
     gameState = 'playing';
@@ -326,6 +468,9 @@
   }
 
   async function endGame() {
+    // 結束就停 BGM，避免干擾
+    stopBGM();
+
     gameState = 'end';
     document.getElementById('hud').classList.add('hidden');
     document.getElementById('end-screen').classList.remove('hidden');
@@ -377,7 +522,6 @@
       }
       if (score > 50) level = 2;
     } else if (gameState === 'start') {
-      // Enter 用 e.key 更穩
       const isEnter = (e.key === 'Enter');
       const isSpace = (e.code === 'Space' && document.activeElement !== document.getElementById('player-name'));
       if (isEnter || isSpace) {
@@ -391,10 +535,14 @@
 
   function loop() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
+
     if (gameState === 'playing') {
       const now = Date.now();
       timeLeft = Math.max(0, gameDuration - Math.floor((now - startTime) / 1000));
       document.getElementById('hud-timer').innerText = timeLeft;
+
+      // 最後10秒：嗶聲提示 + 自動降 BGM 音量
+      handleCountdownBeep(timeLeft);
 
       if (timeLeft <= 0) {
         endGame();
@@ -407,9 +555,14 @@
         targets[i].update(); targets[i].draw();
         if (targets[i].y > canvas.height + 50) { targets.splice(i, 1); score = Math.max(0, score - 2); }
       }
+
       document.getElementById('hud-score').innerText = `分數: ${score}`;
       document.getElementById('hud-level').innerText = (level >= 2) ? '階段: 快捷鍵挑戰' : '階段: 基礎練習';
     }
+
+    // 每幀平滑調整 BGM 音量（duck / recover）
+    tickBgmVolume();
+
     requestAnimationFrame(loop);
   }
 
